@@ -2,6 +2,8 @@ import { PublicKey, TransactionSignature, ParsedTransactionWithMeta } from '@sol
 import { SolanaConnectionManager } from '../connection/solana-connection';
 import { TokenLaunchAnalysis, TransactionPattern, PROGRAM_IDS, AnalysisError } from '../types';
 import { SequenceDiagramGenerator } from '../visualization/sequence-diagram';
+import { TokenAccountDetector } from './token-account-detector';
+import { FundFlowTracker } from './fund-flow-tracker';
 
 /**
  * Core transaction analyzer for Solana token launches
@@ -9,10 +11,14 @@ import { SequenceDiagramGenerator } from '../visualization/sequence-diagram';
 export class TransactionAnalyzer {
   private connectionManager: SolanaConnectionManager;
   private diagramGenerator: SequenceDiagramGenerator;
+  private accountDetector: TokenAccountDetector;
+  private fundFlowTracker: FundFlowTracker;
 
   constructor(connectionManager: SolanaConnectionManager) {
     this.connectionManager = connectionManager;
     this.diagramGenerator = new SequenceDiagramGenerator();
+    this.accountDetector = new TokenAccountDetector(connectionManager);
+    this.fundFlowTracker = new FundFlowTracker();
   }
 
   /**
@@ -41,16 +47,16 @@ export class TransactionAnalyzer {
       // Step 3: Identify launch-related transactions
       const launchTransactions = this.identifyLaunchTransactions(validTransactions);
       
-      // Step 4: Extract token accounts
-      const tokenAccounts = await this.extractTokenAccounts(launchTransactions, mintAddress);
-      
-      // Step 5: Track fund flows
-      const fundFlows = this.extractFundFlows(launchTransactions);
+      // Step 4: Extract token accounts using enhanced detector
+      const tokenAccounts = await this.accountDetector.identifyTokenAccounts(launchTransactions, mintAddress);
+
+      // Step 5: Track fund flows using enhanced tracker
+      const fundFlows = this.fundFlowTracker.extractFundFlows(launchTransactions);
       
       // Step 6: Extract metadata
       const metadata = await this.extractTokenMetadata(mintAddress, launchTransactions);
       
-      // Step 7: Calculate metrics
+      // Step 7: Calculate metrics with enhanced analysis
       const launchMetrics = this.calculateLaunchMetrics(launchTransactions, fundFlows);
       
       // Step 8: Generate sequence diagram
@@ -157,61 +163,20 @@ export class TransactionAnalyzer {
   }
 
   /**
-   * Extract token accounts from launch transactions
+   * Get launch cost analysis
    */
-  private async extractTokenAccounts(transactions: ParsedTransactionWithMeta[], mintAddress: PublicKey) {
-    const accounts = new Set<string>();
-
-    // Extract all unique accounts from transactions
-    transactions.forEach(tx => {
-      tx.transaction.message.accountKeys.forEach(key => {
-        accounts.add(key.pubkey.toString());
-      });
-    });
-
-    console.log(`🔍 Analyzing ${accounts.size} unique accounts`);
-
-    // For now, return basic structure - will be enhanced in next phase
-    return Array.from(accounts).slice(0, 10).map(address => ({
-      address: new PublicKey(address),
-      owner: new PublicKey(address), // Placeholder
-      mint: mintAddress,
-      balance: 0,
-      accountType: 'unknown' as const,
-      createdAt: new Date(),
-      role: 'Participant'
-    }));
+  getLaunchCostAnalysis(fundFlows: any[]) {
+    return this.fundFlowTracker.calculateLaunchCosts(fundFlows);
   }
 
   /**
-   * Extract fund flows from transactions
+   * Detect anomalies in fund flows
    */
-  private extractFundFlows(transactions: ParsedTransactionWithMeta[]) {
-    const fundFlows: any[] = [];
-
-    transactions.forEach(tx => {
-      if (tx.meta?.preBalances && tx.meta?.postBalances) {
-        tx.meta.preBalances.forEach((preBalance, index) => {
-          const postBalance = tx.meta?.postBalances?.[index] || 0;
-          const difference = postBalance - preBalance;
-
-          if (difference !== 0 && tx.transaction.message.accountKeys[index]) {
-            fundFlows.push({
-              from: new PublicKey('11111111111111111111111111111112'), // Placeholder
-              to: tx.transaction.message.accountKeys[index].pubkey,
-              amount: Math.abs(difference) / 1e9, // Convert lamports to SOL
-              token: 'SOL' as const,
-              transactionSignature: tx.transaction.signatures[0] || '',
-              timestamp: new Date(tx.blockTime ? tx.blockTime * 1000 : Date.now()),
-              purpose: difference > 0 ? 'Received' : 'Sent'
-            });
-          }
-        });
-      }
-    });
-
-    return fundFlows.slice(0, 20); // Limit for initial implementation
+  detectFundFlowAnomalies(fundFlows: any[]): string[] {
+    return this.fundFlowTracker.detectAnomalies(fundFlows);
   }
+
+
 
   /**
    * Extract token metadata
@@ -229,21 +194,28 @@ export class TransactionAnalyzer {
   }
 
   /**
-   * Calculate launch metrics
+   * Calculate launch metrics with enhanced analysis
    */
   private calculateLaunchMetrics(transactions: ParsedTransactionWithMeta[], fundFlows: any[]) {
-    const totalCost = fundFlows
-      .filter(flow => flow.token === 'SOL')
-      .reduce((sum, flow) => sum + flow.amount, 0);
+    const costAnalysis = this.fundFlowTracker.calculateLaunchCosts(fundFlows);
+    const anomalies = this.fundFlowTracker.detectAnomalies(fundFlows);
+
+    // Calculate launch duration
+    const timestamps = transactions
+      .map(tx => tx.blockTime ? tx.blockTime * 1000 : Date.now())
+      .sort();
+    const launchDuration = timestamps.length > 1
+      ? ((timestamps[timestamps.length - 1] || 0) - (timestamps[0] || 0)) / 1000
+      : 0;
 
     return {
-      totalCost,
+      totalCost: costAnalysis.totalSOLCost,
       transactionCount: transactions.length,
-      accountsCreated: transactions.length, // Simplified
-      initialDistribution: 0,
-      launchDuration: 0,
-      success: transactions.length > 0,
-      anomalies: []
+      accountsCreated: costAnalysis.breakdown.filter(b => b.purpose.includes('Account Creation')).length,
+      initialDistribution: fundFlows.filter(f => f.token === 'TOKEN').length,
+      launchDuration,
+      success: transactions.length > 0 && costAnalysis.totalSOLCost < 10, // Reasonable cost threshold
+      anomalies
     };
   }
 

@@ -11,6 +11,7 @@
     "analyze": "ts-node src/cli/analyze.ts",
     "diagram": "ts-node src/cli/diagram.ts",
     "test": "ts-node src/cli/test.ts",
+    "sample": "ts-node src/examples/sample-analysis.ts",
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts"
   },

@@ -1,5 +1,5 @@
 {
-  "name": "solana-token-launch-analysis",
+  "name": "solTrace",
   "version": "1.0.0",
   "description": "Comprehensive tool for analyzing Solana blockchain transactions related to token launches",
   "main": "dist/index.js",

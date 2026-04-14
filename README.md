@@ -35,7 +35,7 @@ This project analyzes Solana token launches by:
 ### Installation
 ```bash
 git clone <repository-url>
-cd solana-token-analysis
+cd solTrace
 npm install
 ```
 
